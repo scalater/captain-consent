@@ -1,0 +1,1086 @@
+<script>
+const CC_MODAL_ID = 'cc-modal-cookies-banner';
+const CC_PENDING_COOKIES_KEY = 'captainConsentPending';
+const CC_COOKIE_MODAL = 'cc_consent';
+const CC_SERVER_URL = 'https://cc-platform-api-prod.fly.dev';
+const CC_STANDARD_MODE_ONLY_SETTINGS = 'ONLY_SETTINGS';
+const CC_STANDARD_MODE_BANNER_LINEAL = 'BANNER_LINEAL';
+const CC_MODES_ALLOWED = ['STRICTLY_NECESSARY_COOKIES', 'UNCLASSIFIED_COOKIES'];
+const CC_MODE_DO_NOT_SELL_PERSONAL_INFO = 'DO_NOT_SELL_PERSONAL_INFORMATION';
+const CC_MODAL_ID_SETTINGS = 'cc-modal-cookies-banner-settings';
+
+function toggleActions(shadowRoot) {
+  const privacyLabels = shadowRoot.querySelectorAll('.privacy-label');
+  const toggleAccordion = (e) => {
+    e.currentTarget.classList.toggle('active');
+    e.currentTarget.parentElement.nextElementSibling
+      .querySelector('p')
+      .classList.toggle('active');
+    if (e.currentTarget.parentElement.nextElementSibling.style.maxHeight) {
+      e.currentTarget.parentElement.nextElementSibling.style.maxHeight = null;
+    } else {
+      e.currentTarget.parentElement.nextElementSibling.style.maxHeight =
+        e.currentTarget.parentElement.nextElementSibling.scrollHeight + 'px';
+    }
+  };
+
+  privacyLabels.forEach((label) => {
+    label.addEventListener('click', toggleAccordion);
+  });
+
+  const doNotSellSwitch = shadowRoot.getElementById(
+    'DO_NOT_SELL_PERSONAL_INFORMATION',
+  );
+  const targetingSwitch = shadowRoot.getElementById('TARGETING_COOKIES');
+
+  if (doNotSellSwitch && targetingSwitch) {
+    doNotSellSwitch.addEventListener('change', function () {
+      if (this.checked) {
+        targetingSwitch.checked = false;
+        targetingSwitch.removeAttribute('checked');
+        updateLabelState(targetingSwitch, false);
+      }
+    });
+
+    targetingSwitch.addEventListener('change', function () {
+      if (this.checked) {
+        doNotSellSwitch.checked = false;
+        doNotSellSwitch.removeAttribute('checked');
+        updateLabelState(doNotSellSwitch, false);
+      }
+    });
+  }
+}
+
+function setGTMDataLayer(event, data) {
+  window.dataLayer = window.dataLayer || [];
+  window.gtag =
+    window.gtag ||
+    function () {
+      dataLayer.push(arguments);
+    };
+
+  window.dataLayer.push({
+    event,
+    captainComplianceConsent: {
+      ...data,
+    },
+  });
+
+  gtag('consent', 'update', {
+    analytics_storage: data.selectedCookies.PERFORMANCE_COOKIES
+      ? 'granted'
+      : 'denied',
+    ad_storage: data.selectedCookies.TARGETING_COOKIES ? 'granted' : 'denied',
+    ad_user_data: data.selectedCookies.TARGETING_COOKIES ? 'granted' : 'denied',
+    ad_personalization: data.selectedCookies.TARGETING_COOKIES
+      ? 'granted'
+      : 'denied',
+    functionality_storage: data.selectedCookies.FUNCTIONALITY_COOKIES
+      ? 'granted'
+      : 'denied',
+    security_storage: data.selectedCookies.STRICTLY_NECESSARY_COOKIES
+      ? 'granted'
+      : 'denied',
+  });
+}
+function checkIfAllSwitchesAreOff(bannerDisplays) {
+  if (!bannerDisplays?.length) return false;
+  return (bannerDisplays || []).every(({ display }) => !display);
+}
+
+function getModalPosition(positionX, positionY, mode) {
+  let top,
+    bottom,
+    left,
+    right = 'unset';
+  const positionValue =
+    mode === CC_STANDARD_MODE_BANNER_LINEAL ? '0px' : '10px';
+  if (positionY === 'top') {
+    top = positionValue;
+  } else if (positionY === 'bottom') {
+    bottom = positionValue;
+  } else if (positionY === 'middle') {
+    top = '50%';
+  }
+  if (positionX === 'left') {
+    left = positionValue;
+  } else if (positionX === 'right') {
+    right = positionValue;
+  } else if (positionX === 'middle') {
+    left = '50%';
+  }
+  return {
+    top,
+    bottom,
+    left,
+    right,
+  };
+}
+
+function getModalTranslate(positionX, positionY) {
+  let vertical,
+    horizontal = '0px';
+  if (positionY === 'middle') {
+    vertical = '-50%';
+  }
+  if (positionX === 'middle') {
+    horizontal = '50%';
+  }
+  return {
+    vertical,
+    horizontal,
+  };
+}
+
+function addStyleToShadowRoot(cssString, shadowRoot) {
+  const template = document.createElement('template');
+  template.innerHTML = cssString.trim();
+  const styleElement = template.content.querySelector('style');
+  if (styleElement) {
+    shadowRoot.appendChild(styleElement);
+  } else {
+    console.warn(
+      "Provided CSS string doesn't contain a valid <style> tag:",
+      cssString,
+    );
+  }
+}
+function createConsentBannerStyles(
+  bannerConfiguration,
+  banner,
+  cssModal,
+  cssSettings,
+  cssIcon,
+  shadowRoot,
+  isGPCEnabled,
+) {
+  const { mode, styles } = bannerConfiguration;
+  const { bottom, left, right, top } = getModalPosition(
+    styles.positionX,
+    styles.positionY,
+    mode,
+  );
+  const { vertical, horizontal } = getModalTranslate(
+    styles.positionX,
+    styles.positionY,
+  );
+  const modalClosed =
+    sessionStorage.getItem(CC_COOKIE_MODAL) === 'true' || isGPCEnabled;
+
+  const showCookieVillain = bannerConfiguration.overrideGlobalSettings
+    ? bannerConfiguration.alwaysShowIcon
+    : banner.alwaysShowIcon;
+
+  const forceDisplayCookieIcon =
+    mode === CC_STANDARD_MODE_ONLY_SETTINGS || modalClosed || showCookieVillain;
+
+  const shouldHidden =
+    styles.defaultHidden ||
+    forceDisplayCookieIcon ||
+    modalClosed ||
+    !shouldDisplayBanner(bannerConfiguration, banner);
+
+  const modalNodeStyles = `
+    <style type="text/css">
+      html {
+        -webkit-box-sizing: border-box;
+        -moz-box-sizing: border-box;
+        box-sizing: border-box;
+      }
+    *, *:before, *:after {
+      -webkit-box-sizing: inherit;
+      -moz-box-sizing: inherit;
+      box-sizing: inherit;
+      }
+      :host {
+            --compliance-theme: ${styles.theme};
+            --compliance-position-top: ${top};
+            --compliance-position-left: ${left};
+            --compliance-position-right: ${right};
+            --compliance-position-bottom: ${bottom};
+            --compliance-transform-vertical: ${vertical};
+            --compliance-transform-horizontal: ${horizontal};
+            --compliance-border-radius: ${styles.borderRadius};
+            --compliance-default-hidden: ${shouldHidden ? 'hidden' : 'visible'};
+            --compliance-default-hidden-cookie: ${
+    forceDisplayCookieIcon ? 'visible' : 'hidden'
+  };
+        }
+        h1, h2, h3, h4, p {
+          margin: 0;
+        }
+    </style>
+  `;
+  addStyleToShadowRoot(modalNodeStyles, shadowRoot);
+  addStyleToShadowRoot(cssSettings, shadowRoot);
+  addStyleToShadowRoot(cssModal, shadowRoot);
+  addStyleToShadowRoot(cssIcon, shadowRoot);
+}
+function getItemConfiguration(bannerDisplays, id) {
+  const foundItem = (bannerDisplays || []).find(
+    ({ cookieTypeId }) => cookieTypeId === id,
+  );
+  return (
+    foundItem || {
+      display: true,
+      checked: false,
+    }
+  );
+}
+
+function createSwitchList(switchData, bannerDisplays) {
+  const preferences = (() => {
+    try {
+      const cookie = getCookie(`${CC_COOKIE_MODAL}_preference`);
+      return cookie ? JSON.parse(cookie) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const selectedCookies = preferences?.selectedCookies || {};
+  const finalSwitchData = switchData
+    .sort((a, b) => {
+      if (a.order !== undefined || b.order !== undefined) {
+        return (a.order ?? Infinity) - (b.order ?? Infinity);
+      }
+      return 0;
+    })
+    .reduce((html, { key, name, id }) => {
+      const item = getItemConfiguration(bannerDisplays, id);
+      if (key === 'UNCLASSIFIED_COOKIES' || !item?.display) {
+        return html;
+      }
+      const switchStatus = selectedCookies[key] ?? item?.checked;
+      const isStrictlyNecessary = key === 'STRICTLY_NECESSARY_COOKIES';
+      const isChecked = isStrictlyNecessary || switchStatus;
+      const attributes = [
+        isChecked ? 'checked' : '',
+        isStrictlyNecessary ? 'disabled checked' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const switchItem = `
+      <div class="captain-compliance-modal-settings-body_content_switch_list_item">
+        <div class="captain-compliance-modal-settings-body_content_switch_list_item_preset">
+          <input type="checkbox" id="${key}" ${attributes} />
+          <label for="${key}">Toggle</label>
+        </div>
+        <p class="captain-compliance-modal-settings-body_content_switch_list_item_preset_label">
+          ${name.replace('cookies', '')}
+        </p>
+      </div>
+    `;
+
+      return html + switchItem;
+    }, '');
+  const doNotSellPersonalInfoAttributes = preferences?.notSellPersonalInfo
+    ? 'checked'
+    : '';
+  const doNotSellPersonalInfo = `
+  <div class="captain-compliance-modal-settings-body_content_switch_list_item" style=" padding-top: 10px; padding-bottom: 10px; padding: 10px 5px; margin-top: 15px; border-top: 1px solid lightgray;">
+        <div class="captain-compliance-modal-settings-body_content_switch_list_item_preset">
+          <input type="checkbox" id="${CC_MODE_DO_NOT_SELL_PERSONAL_INFO}" ${doNotSellPersonalInfoAttributes} />
+          <label for="${CC_MODE_DO_NOT_SELL_PERSONAL_INFO}">Toggle</label>
+        </div>
+        <p class="captain-compliance-modal-settings-body_content_switch_list_item_preset_label">
+          Do Not Sell or Share My Personal Information
+        </p>
+      </div>
+  `;
+  return finalSwitchData + doNotSellPersonalInfo;
+}
+
+function generateHtmlModalNode() {
+  const modalNode = document.createElement('div');
+  modalNode.classList.add('captain-compliance-modal-container');
+  modalNode.style.display = 'block';
+  const shadowRoot = modalNode.attachShadow({ mode: 'open' });
+  document.body.appendChild(modalNode);
+  return shadowRoot;
+}
+
+function addModal(
+  bannerConfiguration,
+  switchData,
+  bannerDisplays,
+  report,
+  html,
+  htmlSettingsModal,
+  htmlIcon,
+  shadowRoot,
+  isGPCEnabled,
+) {
+  const hasImage =
+    bannerConfiguration.displayLogo && !!bannerConfiguration.image;
+  const shouldNotDisplayPartialButton =
+    checkIfAllSwitchesAreOff(bannerDisplays);
+  const switchList = createSwitchList(switchData, bannerDisplays);
+
+  shadowRoot.innerHTML += htmlSettingsModal;
+  shadowRoot.innerHTML += !isGPCEnabled ? htmlIcon : '';
+
+  if (parseFloat(bannerConfiguration.overlay) > 0) {
+    shadowRoot.innerHTML += `
+    <div style=" position: absolute; z-index: 9999999999; height: 100vh; width: 100vw; top: 0; left: 0; background: black; opacity: ${bannerConfiguration.overlay};"></div>
+    `;
+  }
+
+  if (html && !isGPCEnabled) {
+    shadowRoot.innerHTML += html;
+  }
+
+  const image = shadowRoot.querySelector(
+    '#captain-compliance-modal-bn-body_content_icon_id',
+  );
+  const switchWrapper = shadowRoot.querySelector(
+    '#captain-compliance-modal-settings-body_content_switch_list_id',
+  );
+  const cookieSettingsButton = shadowRoot.querySelector(
+    '#cc-modal-cookie-settings',
+  );
+  const modalTitle = shadowRoot.querySelector(
+    '#captain-compliance-modal-bn-body_content_text_title_id',
+  );
+
+  const modalDescription = shadowRoot.querySelector(
+    '#captain-compliance-modal-bn-body_content_text_description_id',
+  );
+
+  const modalTransparencyPage = shadowRoot.querySelector(
+    '#captain-compliance-modal-bn-body_footer_transparency_id',
+  );
+
+  if (modalTransparencyPage && report.active) {
+    modalTransparencyPage.href = `https://${report.cname}.cookietransparency.com`;
+  } else if (modalTransparencyPage) {
+    modalTransparencyPage.remove();
+  }
+
+  if (modalTitle && !!bannerConfiguration.title.length) {
+    modalTitle.textContent = bannerConfiguration.title;
+  } else if (modalTitle) {
+    modalTitle.remove();
+  }
+
+  if (modalDescription && !!bannerConfiguration.description.length) {
+    modalDescription.textContent = bannerConfiguration.description;
+  } else if (modalDescription) {
+    modalDescription.remove();
+  }
+
+  if (switchWrapper && !shouldNotDisplayPartialButton) {
+    switchWrapper.innerHTML += switchList;
+  } else if (switchWrapper && cookieSettingsButton) {
+    switchWrapper.remove();
+    cookieSettingsButton.remove();
+  }
+
+  if (image && hasImage) {
+    image.src = bannerConfiguration.image;
+  } else if (image) {
+    image.remove();
+  }
+}
+
+async function loadBannerData() {
+  const paramToken = "417ce899-d29c-43c9-9101-f1f8c707516b";
+  const accessToken =
+    paramToken || document.currentScript.getAttribute('access-token');
+  const response = await fetch(
+    `${CC_SERVER_URL}/banner/banner-token?access-token=${accessToken}`,
+  );
+  return await response.json();
+}
+async function getModalStructure(mode) {
+  const response = await fetch(
+    `${CC_SERVER_URL}/bannerModeStyle/by-mode/${mode}`,
+  );
+  return response ? await response.json() : null;
+}
+
+async function loadData(scannerId) {
+  const response = await fetch(
+    `${CC_SERVER_URL}/report/find-last-report?scannerId=${scannerId}`,
+  );
+  return response ? await response.json() : null;
+}
+
+async function loadSwitchData() {
+  const response = await fetch(`${CC_SERVER_URL}/cookies/cookie-types`);
+  return await response.json();
+}
+
+async function trackBannerLoad(bannerId) {
+  const response = await fetch(
+    `${CC_SERVER_URL}/banner/tracking?id=${bannerId}`,
+  );
+  return await response.json();
+}
+
+async function getCookiesFromServer() {
+  const response = await fetch(`${CC_SERVER_URL}/banner/get-cookies`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  return await response.json();
+}
+
+async function bannerTagTracking(gtmData) {
+  const response = await fetch(`${CC_SERVER_URL}/bannerTagTracking`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      gtmData,
+    }),
+  });
+  return await response.json();
+}
+
+async function updateStatus(bannerId, status) {
+  await fetch(`${CC_SERVER_URL}/bannerTracking/banner/${bannerId}`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      status: status,
+    }),
+  });
+}
+function mergeCookieList(cookieList) {
+  const firstPartyValues = Object.keys(cookieList.firstParty);
+  const dataToReturn = firstPartyValues
+    .reduce((accumulator, key) => {
+      if (CC_MODES_ALLOWED.includes(key)) return accumulator;
+      return [
+        ...accumulator,
+        ...cookieList.firstParty[key].data,
+        ...cookieList.thirdParty[key].data,
+      ];
+    }, [])
+    .map(({ name, domain, path, regex }) => ({ name, domain, path, regex }));
+  return dataToReturn;
+}
+
+function getCookieTypesToNotRemove(shadowRoot, switchData) {
+  return switchData.reduce((accumulator, { key }) => {
+    const checked = shadowRoot.getElementById(key)?.checked;
+    if (checked || CC_MODES_ALLOWED.includes(key)) {
+      return [...accumulator, key];
+    }
+    return accumulator;
+  }, []);
+}
+
+function removeKeyFromObject(cookieList, listToNotRemove) {
+  const localCookieList = { ...cookieList };
+  listToNotRemove.forEach((key) => {
+    delete localCookieList.firstParty[key];
+    delete localCookieList.thirdParty[key];
+  });
+  return localCookieList;
+}
+
+function addCookie(suffix, value, dueDays) {
+  var now = new Date();
+  var time = now.getTime();
+  var expireTime;
+  if (typeof dueDays === 'number' && !isNaN(dueDays)) {
+    expireTime = time + 1000 * 60 * 60 * 24 * dueDays;
+  } else {
+    expireTime = time + 1000 * 60 * 60 * 24 * 30;
+  }
+  now.setTime(expireTime);
+  document.cookie =
+    `${CC_COOKIE_MODAL}_${suffix}=${value}; Expires=` +
+    now.toUTCString() +
+    '; Path=/;';
+}
+
+function closeModal(shadowRoot, scannerId, dueDays, isGPCEnabled) {
+  if (!isGPCEnabled) {
+    shadowRoot.getElementById(CC_MODAL_ID).style.display = 'none';
+  }
+  addCookie(scannerId, 'ok', dueDays);
+}
+
+function addClickHandlerByClass(shadowRoot, className, cb) {
+  const elements = shadowRoot.querySelectorAll(`.${className}`);
+  elements.forEach((element) => {
+    element.onclick = function () {
+      cb();
+    };
+  });
+}
+
+function triggerAllowedRemove(cookieList, listToNotRemove) {
+  const listUpdated = removeKeyFromObject(cookieList, listToNotRemove);
+  reject(mergeCookieList(listUpdated));
+}
+
+function handlePartialAllowedRemove(shadowRoot, switchData, cookieList) {
+  const listToNotRemove = getCookieTypesToNotRemove(shadowRoot, switchData);
+  triggerAllowedRemove(cookieList, listToNotRemove);
+}
+
+function handleDisplayModalSettings(modal, modalSettings, isGPCEnabled) {
+  return () => {
+    if (!isGPCEnabled) {
+      modal.style.display = 'none';
+    }
+    modalSettings.style.visibility = 'visible';
+  };
+}
+
+function fillSwitchesFromPreferences(shadowRoot, switchData, gtmData) {
+  const userPreferenceCookie =
+    gtmData ?? getCookie(`${CC_COOKIE_MODAL}_preference`);
+  if (!userPreferenceCookie) return;
+
+  let preferences;
+  try {
+    preferences =
+      typeof userPreferenceCookie === 'object'
+        ? userPreferenceCookie
+        : JSON.parse(userPreferenceCookie);
+  } catch (error) {
+    console.error('Error parsing cookie preferences:', error);
+    return;
+  }
+
+  const selectedCookies = preferences.selectedCookies || {};
+  if (preferences?.notSellPersonalInfo) {
+    selectedCookies[CC_MODE_DO_NOT_SELL_PERSONAL_INFO] = true;
+  }
+
+  [...switchData, { key: CC_MODE_DO_NOT_SELL_PERSONAL_INFO }].forEach(
+    ({ key }) => {
+      const switchElement = shadowRoot.getElementById(key);
+      if (!switchElement) return;
+      const isStrictlyNecessary = key === 'STRICTLY_NECESSARY_COOKIES';
+      const isChecked = isStrictlyNecessary || selectedCookies?.[key] || false;
+      updateSwitchState(switchElement, isChecked, isStrictlyNecessary);
+      updateLabelState(switchElement, isChecked);
+    },
+  );
+}
+
+function updateSwitchState(element, isChecked, isStrictlyNecessary) {
+  element.checked = isChecked;
+
+  if (isChecked) {
+    element.setAttribute('checked', '');
+  } else {
+    element.removeAttribute('checked');
+  }
+
+  if (isStrictlyNecessary) {
+    element.setAttribute('disabled', '');
+  } else {
+    element.removeAttribute('disabled');
+  }
+}
+
+function updateLabelState(switchElement, isChecked) {
+  const parentPreset = switchElement.closest(
+    '.captain-compliance-modal-settings-body_content_switch_list_item_preset',
+  );
+
+  parentPreset?.querySelector('label')?.classList.toggle('active', isChecked);
+}
+async function handleDataLayerReporting(gtmData, dueDays) {
+  const data = await bannerTagTracking(gtmData);
+  const dataWithId = { ...gtmData, id: data.id };
+  addCookie('preference', JSON.stringify(dataWithId), dueDays);
+  setGTMDataLayer('captainComplianceConsent', dataWithId);
+}
+
+function modalActions(
+  cookieList,
+  switchData,
+  banner,
+  configuration,
+  shadowRoot,
+  geoInfo,
+  isGPCEnabled,
+) {
+  const { scannerId, id: bannerId } = banner;
+  /*  const showCookieVillain = configuration.overrideGlobalSettings
+    ? configuration.alwaysShowIcon
+    : banner.alwaysShowIcon;
+ */
+  const modal = shadowRoot.getElementById(CC_MODAL_ID);
+  const modalSettings = shadowRoot.getElementById(CC_MODAL_ID_SETTINGS);
+  const selectedCookieButton = shadowRoot.getElementById(
+    'cc-cookie-simple-button_id',
+  );
+  const handleDisplayModalSettingsTrigger = handleDisplayModalSettings(
+    modal,
+    modalSettings,
+    isGPCEnabled,
+  );
+  if (selectedCookieButton) {
+    selectedCookieButton.onclick = function () {
+      if (
+        configuration.mode === CC_STANDARD_MODE_ONLY_SETTINGS &&
+        modalSettings
+      ) {
+        modalSettings.style.visibility = 'visible';
+      } else if (modal) {
+        modal.style.display = 'block';
+        modal.style.visibility = 'visible';
+        sessionStorage.removeItem(CC_COOKIE_MODAL);
+      }
+      selectedCookieButton.style.visibility = 'hidden';
+    };
+
+    addClickHandlerByClass(shadowRoot, 'cc-modal-logo-footer-compliance', () =>
+      window.open(
+        'https://captaincompliance.com/solutions/cookie-consent-manager/',
+        '_blank',
+      ),
+    );
+  }
+
+  const selectedModalCloseButton =
+    shadowRoot.getElementById('cc-modal-close-all');
+  if (selectedModalCloseButton) {
+    selectedModalCloseButton.onclick = function () {
+      const cookieRemoved = isCookieRemoved(`${CC_COOKIE_MODAL}_${scannerId}`);
+      const hasThirdPartyClass = modal?.classList.contains(
+        'cc-trigger-from-third-party',
+      );
+      if (cookieRemoved && modal && !hasThirdPartyClass) {
+        modal.style.display = 'block';
+      }
+      if (configuration.mode === CC_STANDARD_MODE_ONLY_SETTINGS) {
+        selectedCookieButton.style.visibility = 'visible';
+      }
+      if (modalSettings) {
+        modalSettings.style.visibility = 'hidden';
+        fillSwitchesFromPreferences(shadowRoot, switchData);
+      }
+    };
+  }
+
+  const partialAllowedButton = shadowRoot.getElementById(
+    'cc-modal-allow-selection',
+  );
+  if (partialAllowedButton) {
+    partialAllowedButton.onclick = function () {
+      closeModal(shadowRoot, scannerId, configuration.dueDays, isGPCEnabled);
+      updateStatus(bannerId, 'PARTIALLY_ALLOWED');
+      modalSettings.style.visibility = 'hidden';
+      handlePartialAllowedRemove(shadowRoot, switchData, cookieList);
+      const selectedCookies = switchData.reduce((accumulator, { key }) => {
+        const checked = shadowRoot.getElementById(key)?.checked ?? false;
+        return { ...accumulator, [key]: checked };
+      }, {});
+
+      const doNotSellPersonalInfoSwitch = shadowRoot.getElementById(
+        CC_MODE_DO_NOT_SELL_PERSONAL_INFO,
+      );
+      const doNotSellPersonalInfoEnabled =
+        doNotSellPersonalInfoSwitch?.checked ?? false;
+      const gtmData = {
+        status: 'PARTIALLY_ALLOWED',
+        scannerId,
+        bannerId,
+        geoInfo,
+        notSellPersonalInfo: doNotSellPersonalInfoEnabled,
+        selectedCookies,
+      };
+      handleDataLayerReporting(gtmData, configuration.dueDays);
+      fillSwitchesFromPreferences(shadowRoot, switchData, gtmData);
+    };
+  }
+
+  const allowAllButton = shadowRoot.getElementById('cc-modal-allow-all');
+  if (allowAllButton) {
+    allowAllButton.onclick = function () {
+      debugger;
+      closeModal(shadowRoot, scannerId, configuration.dueDays, isGPCEnabled);
+      updateStatus(bannerId, 'ALLOWED');
+      reject([]);
+      const gtmData = {
+        status: 'ALLOWED',
+        scannerId,
+        bannerId,
+        geoInfo,
+        notSellPersonalInfo: false,
+        selectedCookies: {
+          STRICTLY_NECESSARY_COOKIES: true,
+          TARGETING_COOKIES: true,
+          FUNCTIONALITY_COOKIES: true,
+          PERFORMANCE_COOKIES: true,
+          UNCLASSIFIED_COOKIES: true,
+        },
+      };
+      handleDataLayerReporting(gtmData, configuration.dueDays);
+      fillSwitchesFromPreferences(shadowRoot, switchData, gtmData);
+    };
+  }
+
+  const rejectAllButton = shadowRoot.getElementById('cc-modal-reject-all');
+  if (rejectAllButton) {
+    rejectAllButton.onclick = function () {
+      closeModal(shadowRoot, scannerId, configuration.dueDays, isGPCEnabled);
+      updateStatus(bannerId, 'REJECTED');
+      reject(mergeCookieList(cookieList));
+      const gtmData = {
+        status: 'REJECTED',
+        scannerId,
+        bannerId,
+        geoInfo,
+        notSellPersonalInfo: false,
+        selectedCookies: {
+          STRICTLY_NECESSARY_COOKIES: false,
+          TARGETING_COOKIES: false,
+          FUNCTIONALITY_COOKIES: false,
+          PERFORMANCE_COOKIES: false,
+          UNCLASSIFIED_COOKIES: false,
+        },
+      };
+      handleDataLayerReporting(gtmData, configuration.dueDays);
+      fillSwitchesFromPreferences(shadowRoot, switchData, gtmData);
+    };
+  }
+
+  const modalCloseIconButton = shadowRoot.getElementById(
+    'cc-cookie-simple-button-close_id',
+  );
+  if (modalCloseIconButton) {
+    modalCloseIconButton.onclick = function () {
+      modal.style.display = 'none';
+      selectedCookieButton.style.visibility = 'visible';
+      sessionStorage.setItem(CC_COOKIE_MODAL, 'true');
+    };
+  }
+  const externalButton = document.getElementById('id-open-settings-cc');
+  if (externalButton) {
+    externalButton.addEventListener('click', () => {
+      if (!isGPCEnabled) {
+        modal?.classList?.add('cc-trigger-from-third-party');
+      }
+      handleDisplayModalSettingsTrigger();
+    });
+  } else {
+    document.body.addEventListener('click', function (event) {
+      if (event.target && event.target.id === 'id-open-settings-cc') {
+        if (!isGPCEnabled) {
+          modal?.classList?.add('cc-trigger-from-third-party');
+        }
+        handleDisplayModalSettingsTrigger();
+      }
+    });
+  }
+
+  addClickHandlerByClass(
+    shadowRoot,
+    'captain-compliance-open-settings',
+    handleDisplayModalSettingsTrigger,
+  );
+}
+
+async function safeRemoveCookiesOnList(cookieList) {
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  await removeCookiesOnList(cookieList);
+}
+
+async function removeCookiesOnList(cookieList) {
+  const regex = new RegExp(`${CC_COOKIE_MODAL}_\\d+`);
+  const cookies = document.cookie.split(';');
+  const cookiesServer = await getCookiesFromServer();
+  const cookiesServerArray = cookiesServer.cookies
+    ? Object.keys(cookiesServer.cookies)
+    : [];
+  const fromServer = [];
+  cookieList.forEach((cookieItem) => {
+    const prefix = cookieItem.name;
+    fromServer.push(prefix);
+    [...cookies, ...cookiesServerArray].forEach((cookie) => {
+      const [name] = cookie.trim().split('=');
+      const isMatch = name.startsWith(prefix) && name.length >= prefix.length;
+      const isRegexMatch = cookieItem.regex
+        ? new RegExp(cookieItem.regex).test(name)
+        : isMatch;
+      if (!regex.test(name) && isRegexMatch) {
+        const expiration = `${name}=; expires=Thu, 01 Jan 1970 00:00:01 GMT;`;
+        document.cookie = `${expiration}`;
+        document.cookie = `${expiration} path=/;`;
+        document.cookie = `${expiration} path=/; domain=${cookieItem.domain}`;
+        document.cookie = `${expiration} path=/; domain=${cookieItem.domain}; secure`;
+        document.cookie = `${expiration} path=/; domain=${cookieItem.domain}; SameSite=None; Secure`;
+        const cookieRemoved = isCookieRemoved(name);
+        if (!cookieRemoved) {
+          let date = new Date();
+          date.setTime(date.getTime() + -1 * 24 * 60 * 60 * 1000);
+          const expires = '; expires=' + date.toGMTString();
+          document.cookie = `${name}=${expires}; path=/;`;
+        }
+      }
+    });
+  });
+}
+
+function checkAndRemoveMissingCookies() {
+  const regex = new RegExp(`^${CC_COOKIE_MODAL}_(\\d+)$`);
+  const hasCookieModalCookie = document.cookie.split(';').some((cookie) => {
+    const cookieName = cookie.trim().split('=')[0];
+    return cookieName && regex.test(cookieName);
+  });
+
+  if (!hasCookieModalCookie) {
+    return;
+  }
+  const storedPendingCookies = localStorage.getItem(CC_PENDING_COOKIES_KEY);
+  const pendingCookies = storedPendingCookies
+    ? JSON.parse(storedPendingCookies)
+    : [];
+  safeRemoveCookiesOnList(pendingCookies);
+}
+
+function isCookieRemoved(cookieName) {
+  return document.cookie.split(';').every((cookie) => {
+    return cookie.trim().startsWith(`${cookieName}=`) === false;
+  });
+}
+
+function reject(cookieList) {
+  removeCookiesOnList(cookieList);
+  localStorage.setItem(CC_PENDING_COOKIES_KEY, JSON.stringify(cookieList));
+}
+
+function shouldDisplayBanner(bannerConfiguration, banner) {
+  if (
+    !!bannerConfiguration &&
+    !bannerConfiguration.active &&
+    !bannerConfiguration.region.isGlobal
+  ) {
+    return false;
+  }
+  const cookieRemoved = isCookieRemoved(
+    `${CC_COOKIE_MODAL}_${banner.scannerId}`,
+  );
+  if (!cookieRemoved) return false;
+  return true;
+}
+
+function getDomain() {
+  return window.location.hostname.replace('www.', '');
+}
+
+function getDomainFromString(urlString) {
+  try {
+    const url = new URL(urlString);
+    return url.hostname.replace('www.', '');
+  } catch (error) {
+    return 'Invalid URL';
+  }
+}
+function getCookie(name) {
+  const cookies = document.cookie.split('; ');
+  for (const cookie of cookies) {
+    const [cookieName, cookieValue] = cookie.split('=');
+    if (cookieName === name) {
+      return decodeURIComponent(cookieValue);
+    }
+  }
+  return null;
+}
+
+function handleUserConsentPreferences() {
+  const userPreferenceCookie = getCookie(`${CC_COOKIE_MODAL}_preference`);
+  if (!userPreferenceCookie) return;
+  try {
+    const preferences = JSON.parse(userPreferenceCookie);
+    setGTMDataLayer('captainComplianceConsent', preferences);
+  } catch (error) {
+    return;
+  }
+}
+
+function getBannerDefaultStyles(
+  bannerModeStyle,
+  bannerConfiguration,
+  icon,
+  settings,
+) {
+  return {
+    html: bannerConfiguration.html || bannerModeStyle.html,
+    css: bannerConfiguration.css || bannerModeStyle.styles,
+    miniHtml: bannerConfiguration.miniHtml || icon.html,
+    miniCss: bannerConfiguration.miniCss || icon.styles,
+    settingsHtml: bannerConfiguration.settingsHtml || settings.html,
+    settingsCss: bannerConfiguration.settingsCss || settings.styles,
+  };
+}
+
+async function renderModal() {
+  console.log('renderModal');
+  const isGPCEnabled = navigator.globalPrivacyControl === true;
+  const data = await loadBannerData();
+  const currentDomain = getDomain();
+  const expectedDomain = getDomainFromString(data.banner.scanner.domain);
+  if (currentDomain !== expectedDomain) {
+    console.log(
+      '%cSORRY THIS IS NOT THE ALLOWED DOMAIN',
+      'color: red; font-size: 20px',
+    );
+    return;
+  }
+  const {
+    bannerConfiguration,
+    bannerDisplays,
+    banner,
+    report,
+    geoInfo,
+    bannerModeStyle,
+  } = data;
+  const geolocation = {
+    country: geoInfo.country,
+    countryCode: geoInfo.countryCode,
+    region: geoInfo.region,
+    regionName: geoInfo.regionName,
+    city: geoInfo.city,
+    timezone: geoInfo.timezone,
+  };
+  const bannerReport = await loadData(banner.scannerId);
+  if (bannerReport) {
+    const switchData = await loadSwitchData();
+    const shadowRoot = generateHtmlModalNode();
+    if (isGPCEnabled) {
+      console.log('%cGPC Signal', 'color: blue; font-size: 15px');
+      triggerAllowedRemove(bannerReport.reportInformation.cookies, [
+        'STRICTLY_NECESSARY_COOKIES',
+        'UNCLASSIFIED_COOKIES',
+      ]);
+      const gtmData = {
+        status: 'GPC_SIGNAL',
+        scannerId: banner.scannerId,
+        bannerId: banner.id,
+        notSellPersonalInfo: true,
+        geoInfo: geolocation,
+        selectedCookies: {
+          STRICTLY_NECESSARY_COOKIES: true,
+          TARGETING_COOKIES: true,
+          FUNCTIONALITY_COOKIES: false,
+          PERFORMANCE_COOKIES: false,
+          UNCLASSIFIED_COOKIES: true,
+        },
+      };
+      handleDataLayerReporting(gtmData, bannerConfiguration.dueDays);
+    }
+    /*  {
+      handleDataLayerReporting(
+        {
+          status: 'CONSENT',
+          scannerId: banner.scannerId,
+          bannerId: banner.id,
+          notSellPersonalInfo: false,
+          geoInfo: geolocation,
+          selectedCookies: {},
+        },
+        bannerConfiguration.dueDays,
+      );
+    } */
+    const settingsModalStructure = await getModalStructure('SETTINGS');
+    const iconCookieStructure = await getModalStructure('ICON');
+    const bannerStructured = getBannerDefaultStyles(
+      bannerModeStyle,
+      bannerConfiguration,
+      iconCookieStructure,
+      settingsModalStructure,
+    );
+    trackBannerLoad(banner.id);
+    addModal(
+      bannerConfiguration,
+      switchData,
+      bannerDisplays,
+      report,
+      bannerStructured.html,
+      bannerStructured.settingsHtml,
+      bannerStructured.miniHtml,
+      shadowRoot,
+      isGPCEnabled,
+    );
+    createConsentBannerStyles(
+      bannerConfiguration,
+      banner,
+      bannerStructured.css,
+      bannerStructured.settingsCss,
+      bannerStructured.miniCss,
+      shadowRoot,
+      isGPCEnabled,
+    );
+    modalActions(
+      bannerReport.reportInformation.cookies,
+      switchData,
+      banner,
+      bannerConfiguration,
+      shadowRoot,
+      geolocation,
+      isGPCEnabled,
+    );
+    toggleActions(shadowRoot);
+  }
+}
+
+(function () {
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  function onRouteChange(url) {
+    console.log(`Navigated to: ${url}`);
+    checkAndRemoveMissingCookies();
+    handleUserConsentPreferences();
+  }
+  history.pushState = function (...args) {
+    originalPushState.apply(this, args); // Call the original method
+    onRouteChange(window.location.href); // Trigger the route change handler
+  };
+  history.replaceState = function (...args) {
+    originalReplaceState.apply(this, args); // Call the original method
+    onRouteChange(window.location.href); // Trigger the route change handler
+  };
+  window.addEventListener('popstate', function () {
+    onRouteChange(window.location.href);
+  });
+})();
+
+function pollForGtag(cb, pollTime=0) {
+  if (window.gtag && typeof window.gtag === 'function') return cb(window.gtag);
+  if (pollTime >= 3000) return false;
+  let nextIteration = pollForGtag.bind(null, cb, pollTime + 50);
+  setTimeout(nextIteration, 50);
+}
+
+(function () {
+  function onContentLoaded() {
+    console.log('All content loaded successfully.');
+    checkAndRemoveMissingCookies();
+    handleUserConsentPreferences();
+    pollForGtag(function(){
+      renderModal();
+    })
+  }
+  if (document.readyState === 'complete') {
+    onContentLoaded();
+  } else {
+    window.addEventListener('load', onContentLoaded);
+  }
+  console.log('Content load listener initialized.');
+})();
+
+window.addEventListener('beforeunload', function () {
+  checkAndRemoveMissingCookies();
+  handleUserConsentPreferences();
+});
+
+</script>
